@@ -1,10 +1,16 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TechPay | Billetera virtual</title>
   <link rel="stylesheet" href="styles.css">
+  <!-- Chart.js para gráficos estadísticos -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- QRCode.js para generación de códigos QR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Html5-QRCode para escaneo vía cámara -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -23,11 +29,15 @@
           <span>Buen día,</span>
           <strong>Sergio</strong>
         </div>
-<!-- Botón en el header -->
-<button class="icon-button" id="notification-btn" aria-label="Notificaciones">
-  <span class="notification-dot"></span>
-  🔔
-</button>
+        <!-- Botón de Tema (Modo Oscuro / Claro) -->
+        <button class="icon-button" id="theme-toggle-btn" aria-label="Cambiar tema">
+          🌙
+        </button>
+        <!-- Botón de Notificaciones -->
+        <button class="icon-button" id="notification-btn" aria-label="Notificaciones">
+          <span class="notification-dot"></span>
+          🔔
+        </button>
         <div class="user-avatar" aria-label="Avatar de Sergio">S</div>
       </div>
     </header>
@@ -107,6 +117,28 @@
               </span>
               <span class="operation-arrow" aria-hidden="true">→</span>
             </button>
+            <!-- Acción Móvil / Rápida QR -->
+            <button class="operation-card operation-qr" type="button" id="open-qr-modal-btn">
+              <span class="operation-icon" aria-hidden="true">📷</span>
+              <span>
+                <strong>Cobrar / Pagar QR</strong>
+                <small>Generá o escaneá un QR</small>
+              </span>
+              <span class="operation-arrow" aria-hidden="true">→</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Gráficos Estadísticos -->
+        <section class="section-block" aria-labelledby="stats-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Estadísticas</p>
+              <h2 id="stats-title">Desglose de Gastos e Ingresos</h2>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="expenses-chart"></canvas>
           </div>
         </section>
 
@@ -215,11 +247,51 @@
         <label class="form-label" for="operation-amount">Monto</label>
         <div class="amount-input"><span>$</span><input id="operation-amount" type="number" min="1" step="0.01" placeholder="0,00"></div>
         <p class="conversion-help is-hidden" id="conversion-help"></p>
-        <label class="form-label" for="operation-detail">Descripción</label>
-        <input class="text-input" id="operation-detail" type="text" placeholder="Ej: Dinero recibido">
+        
+        <!-- Categoría para Estadísticas -->
+        <label class="form-label" for="operation-category">Categoría</label>
+        <select class="text-input" id="operation-category">
+          <option value="Servicios">Servicios</option>
+          <option value="Transferencias" selected>Transferencias</option>
+          <option value="Compras">Compras</option>
+          <option value="Otros">Otros</option>
+        </select>
+
+        <label class="form-label" for="operation-detail" id="operation-detail-label">Descripción, CBU/CVU o Alias</label>
+        <input class="text-input" id="operation-detail" type="text" placeholder="Ej: 0000003100010000000001 o alias.demo.app">
+        
+        <!-- Contenedor de Verificación / Validación Dinámica -->
+        <div class="recipient-badge is-hidden" id="recipient-info"></div>
+
         <p class="form-error is-hidden" id="form-error"></p>
         <button class="primary-button" type="submit" id="operation-submit">Confirmar operación</button>
       </form>
+    </section>
+  </div>
+
+  <!-- Modal Generador y Escáner QR -->
+  <div class="modal-backdrop is-hidden" id="qr-modal" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
+    <section class="modal-card">
+      <button class="modal-close" id="close-qr-modal" type="button" aria-label="Cerrar ventana">×</button>
+      <p class="eyebrow">Operación rápida</p>
+      <h2 id="qr-modal-title">Cobrar o Pagar con QR</h2>
+      <div class="qr-tabs">
+        <button class="tab-button is-active" id="qr-gen-tab" type="button">Mi Código QR (Cobrar)</button>
+        <button class="tab-button" id="qr-scan-tab" type="button">Escanear QR (Pagar)</button>
+      </div>
+
+      <!-- Sección Generación -->
+      <div id="qr-generator-section" class="qr-section">
+        <p class="form-label" style="text-align: center; margin-top: 15px;">Mostrá este código para recibir dinero en tu cuenta</p>
+        <div id="qrcode-container" class="qr-box"></div>
+        <p style="text-align: center; font-size: 13px; font-weight: bold; margin-top: 10px;" id="qr-alias-label">techpay.sergio</p>
+      </div>
+
+      <!-- Sección Escáner -->
+      <div id="qr-scanner-section" class="qr-section is-hidden">
+        <div id="qr-reader" style="width:100%; margin-top: 15px;"></div>
+        <p class="form-label" style="text-align: center; margin-top: 10px;">Apuntá con tu cámara al código QR de cobro</p>
+      </div>
     </section>
   </div>
 
@@ -240,19 +312,16 @@
     </section>
   </div>
 
-  <!-- MODAL NUEVO: ADMINISTRAR SERVICIOS -->
+  <!-- Modal Administrar Servicios -->
   <div class="modal-backdrop is-hidden" id="services-modal" role="dialog" aria-modal="true" aria-labelledby="services-modal-title">
     <section class="modal-card modal-card-large">
       <button class="modal-close" id="close-services-modal" type="button" aria-label="Cerrar ventana">×</button>
       <p class="eyebrow">Gestión de pagos</p>
       <h2 id="services-modal-title">Administrar servicios</h2>
 
-      <!-- Lista de Servicios con Opciones de Edición/Eliminación -->
       <div class="modal-services-list" id="modal-services-list"></div>
-
       <button class="outline-button" id="btn-show-add-service" type="button">+ Añadir nuevo servicio</button>
 
-      <!-- Formulario Dinámico para Crear / Editar Servicio -->
       <form id="service-form" class="service-form-box is-hidden">
         <h3 id="service-form-title">Nuevo servicio</h3>
         <input type="hidden" id="service-edit-id">
@@ -288,17 +357,16 @@
       </div>
     </section>
   </div>
-<!-- Modal de Notificaciones -->
-<div class="modal-backdrop is-hidden" id="notifications-modal" aria-hidden="true">
-  <div class="modal-card">
-    <button class="modal-close" id="close-notifications-modal" aria-label="Cerrar modal">&times;</button>
-    <h2>Notificaciones</h2>
 
-    <div class="notifications-list" id="notifications-container">
-      <!-- Los avisos se renderizan dinámicamente desde JS -->
+  <!-- Modal de Notificaciones -->
+  <div class="modal-backdrop is-hidden" id="notifications-modal" aria-hidden="true">
+    <div class="modal-card">
+      <button class="modal-close" id="close-notifications-modal" aria-label="Cerrar modal">&times;</button>
+      <h2>Notificaciones</h2>
+      <div class="notifications-list" id="notifications-container"></div>
     </div>
   </div>
-</div>
+
   <script src="app.js"></script>
 </body>
 </html>

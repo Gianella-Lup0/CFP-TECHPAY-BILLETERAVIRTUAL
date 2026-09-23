@@ -7,16 +7,18 @@ const STORAGE_KEYS = {
   BALANCE_USD: 'techpay_saldo_usd',
   TRANSACTIONS: 'techpay_transacciones',
   CONTACTS: 'techpay_contactos',
-  SERVICES: 'techpay_servicios'
+  SERVICES: 'techpay_servicios',
+  THEME: 'techpay_theme'
 };
 
 const DEFAULT_WALLET = {
   balanceARS: 125000.50,
   balanceUSD: 102.46,
   transactions: [
-    { id: '1695000000000', type: 'expense', amount: 4500, description: 'Transferencia a Camila', date: 'Hoy, 14:20' },
-    { id: '1694990000000', type: 'income', amount: 25000, description: 'Dinero recibido', date: 'Hoy, 11:05' },
-    { id: '1694980000000', type: 'currency', amount: 50, description: 'Compra de dólares', date: 'Ayer, 18:42' }
+    { id: '1695000000000', type: 'expense', category: 'Transferencias', amount: 4500, description: 'Transferencia a Camila', date: 'Hoy, 14:20' },
+    { id: '1694990000000', type: 'income', category: 'Otros', amount: 25000, description: 'Dinero recibido', date: 'Hoy, 11:05' },
+    { id: '1694980000000', type: 'expense', category: 'Servicios', amount: 8900, description: 'Pago de Celular', date: 'Ayer, 18:42' },
+    { id: '1694970000000', type: 'expense', category: 'Compras', amount: 15400, description: 'Supermercado', date: 'Ayer, 12:15' }
   ],
   contacts: [
     { id: '1', name: 'Lucas', alias: 'lucas.dev' },
@@ -30,6 +32,46 @@ const DEFAULT_WALLET = {
     { id: 'phone', name: 'Celular Móvil', amount: 8900, dueDate: 'Vence el 28 Sep', paid: false, logoClass: 'service-phone', logoIcon: '⌁' }
   ]
 };
+
+let expensesChart = null;
+let html5QrCodeScanner = null;
+
+
+// ==========================================
+// FUNCIONALIDAD PROPUESTA 1: THEME TOGGLE
+// ==========================================
+
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
+
+function initTheme() {
+  const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
+
+  document.documentElement.setAttribute('data-theme', initialTheme);
+  updateThemeIcon(initialTheme);
+}
+
+function updateThemeIcon(theme) {
+  if (themeToggleBtn) {
+    themeToggleBtn.textContent = theme === 'dark' ? '🌙' : '☀️';
+  }
+}
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener('click', () => {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
+    updateThemeIcon(newTheme);
+
+    if (expensesChart) {
+      renderExpensesChart(); // Re-renderizar para ajustar paletas
+    }
+  });
+}
 
 
 // ==========================================
@@ -81,7 +123,6 @@ let dollarRates = {
   venta: 1220
 };
 
-// Formato de moneda actualizado a ARS$y USD$
 const formatCurrencyARS = (value) => {
   return `ARS$ ${Number(value).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
@@ -92,7 +133,7 @@ const formatCurrencyUSD = (value) => {
 
 
 // ==========================================
-// FUNCIONALIDAD 1: MOSTRAR / OCULTAR SALDO
+// MOSTRAR / OCULTAR SALDO & TOAST
 // ==========================================
 
 const balanceTitle = document.getElementById('balance-title');
@@ -114,34 +155,17 @@ function renderBalance() {
   }
 }
 
-renderBalance();
-
 if (toggleBalanceBtn) {
   toggleBalanceBtn.addEventListener('click', () => {
     isBalanceVisible = !isBalanceVisible;
-
-    if (isBalanceVisible) {
-      renderBalance();
-      toggleBalanceBtn.setAttribute('aria-label', 'Ocultar saldo');
-      toggleBalanceBtn.setAttribute('aria-pressed', 'false');
-      if (privacyIcon) privacyIcon.textContent = '◉';
-    } else {
-      renderBalance();
-      toggleBalanceBtn.setAttribute('aria-label', 'Mostrar saldo');
-      toggleBalanceBtn.setAttribute('aria-pressed', 'true');
-      if (privacyIcon) privacyIcon.textContent = '○';
-    }
+    renderBalance();
+    toggleBalanceBtn.setAttribute('aria-pressed', !isBalanceVisible);
+    if (privacyIcon) privacyIcon.textContent = isBalanceVisible ? '◉' : '○';
   });
 }
 
-
-// ==========================================
-// FUNCIONALIDAD 2: COPIAR ALIAS Y TOAST
-// ==========================================
-
 const copyAliasBtn = document.getElementById('copy-alias');
 const toastElement = document.getElementById('toast');
-
 let toastTimeoutId = null;
 
 function showToast(message) {
@@ -150,9 +174,7 @@ function showToast(message) {
   toastElement.textContent = message;
   toastElement.classList.add('is-visible');
 
-  if (toastTimeoutId) {
-    clearTimeout(toastTimeoutId);
-  }
+  if (toastTimeoutId) clearTimeout(toastTimeoutId);
 
   toastTimeoutId = setTimeout(() => {
     toastElement.classList.remove('is-visible');
@@ -161,21 +183,18 @@ function showToast(message) {
 
 if (copyAliasBtn) {
   copyAliasBtn.addEventListener('click', async () => {
-    const textToCopy = copyAliasBtn.dataset.copyValue;
-
     try {
-      await navigator.clipboard.writeText(textToCopy);
+      await navigator.clipboard.writeText(copyAliasBtn.dataset.copyValue);
       showToast('¡Alias copiado al portapapeles!');
     } catch (error) {
       showToast('Error al copiar el alias');
-      console.error('Error al intentar copiar:', error);
     }
   });
 }
 
 
 // ==========================================
-// FUNCIONALIDAD 3: CONSULTA DE COTIZACIÓN (API)
+// CONSULTA DE COTIZACIÓN (API)
 // ==========================================
 
 const exchangeStatus = document.getElementById('exchange-status');
@@ -187,13 +206,9 @@ async function fetchDollarRates() {
 
   try {
     const response = await fetch('https://dolarapi.com/v1/dolares/oficial');
-
-    if (!response.ok) {
-      throw new Error(`Respuesta no ok de la API. Status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error('Error al conectar con API');
 
     const data = await response.json();
-
     dollarRates.compra = data.compra;
     dollarRates.venta = data.venta;
 
@@ -202,7 +217,6 @@ async function fetchDollarRates() {
     if (exchangeStatus) exchangeStatus.textContent = 'Actualizado ahora';
 
   } catch (error) {
-    console.error('Error al obtener la cotización del dólar:', error);
     if (dollarBuy) dollarBuy.textContent = formatCurrencyARS(dollarRates.compra);
     if (dollarSell) dollarSell.textContent = formatCurrencyARS(dollarRates.venta);
     if (exchangeStatus) exchangeStatus.textContent = 'Valor de referencia';
@@ -211,7 +225,7 @@ async function fetchDollarRates() {
 
 
 // ==========================================
-// FUNCIONALIDAD 4: APERTURA Y CIERRE DE MODALES
+// MODALES Y NAVEGACIÓN
 // ==========================================
 
 const operationCards = document.querySelectorAll('[data-operation]');
@@ -230,10 +244,14 @@ const servicesModal = document.getElementById('services-modal');
 const manageServicesBtn = document.getElementById('manage-services');
 const closeServicesModalBtn = document.getElementById('close-services-modal');
 
+const qrModal = document.getElementById('qr-modal');
+const openQrModalBtn = document.getElementById('open-qr-modal-btn');
+const closeQrModalBtn = document.getElementById('close-qr-modal');
+
 const operationAmountInput = document.getElementById('operation-amount');
 const operationDetailInput = document.getElementById('operation-detail');
 const conversionHelpMsg = document.getElementById('conversion-help');
-const formErrorMsg = document.getElementById('form-error');
+const recipientInfo = document.getElementById('recipient-info');
 
 const operationTitles = {
   income: 'Ingresar dinero',
@@ -246,7 +264,7 @@ function openModal(operationType) {
   modalTitle.textContent = operationTitles[operationType] || 'Operación';
   operationModal.dataset.operation = operationType;
 
-  if (formErrorMsg) formErrorMsg.classList.add('is-hidden');
+  if (recipientInfo) recipientInfo.classList.add('is-hidden');
 
   if (operationType === 'currency') {
     if (conversionHelpMsg) conversionHelpMsg.classList.remove('is-hidden');
@@ -264,7 +282,7 @@ function closeModal() {
   const form = document.getElementById('operation-form');
   if (form) form.reset();
   if (conversionHelpMsg) conversionHelpMsg.classList.add('is-hidden');
-  if (formErrorMsg) formErrorMsg.classList.add('is-hidden');
+  if (recipientInfo) recipientInfo.classList.add('is-hidden');
 }
 
 function openContactModal() {
@@ -301,11 +319,8 @@ function updateCurrencyCalculation() {
   if (operationModal.dataset.operation !== 'currency' || !operationAmountInput) return;
 
   const amountARS = Number(operationAmountInput.value);
-
   if (!amountARS || amountARS <= 0) {
-    if (conversionHelpMsg) {
-      conversionHelpMsg.textContent = `Cotización venta: ${formatCurrencyARS(dollarRates.venta)}. Ingresá un monto en ARS.`;
-    }
+    if (conversionHelpMsg) conversionHelpMsg.textContent = `Cotización venta: ${formatCurrencyARS(dollarRates.venta)}. Ingresá un monto en ARS.`;
     return;
   }
 
@@ -316,67 +331,215 @@ function updateCurrencyCalculation() {
 }
 
 if (operationAmountInput) {
-  operationAmountInput.addEventListener('input', () => {
-    if (operationModal && operationModal.dataset.operation === 'currency') {
-      updateCurrencyCalculation();
-    }
-  });
+  operationAmountInput.addEventListener('input', updateCurrencyCalculation);
 }
 
 operationCards.forEach((card) => {
-  card.addEventListener('click', () => {
-    const operationType = card.dataset.operation;
-    openModal(operationType);
-  });
+  card.addEventListener('click', () => openModal(card.dataset.operation));
 });
 
 if (closeModalBtn) closeModalBtn.addEventListener('click', closeModal);
-
-if (operationModal) {
-  operationModal.addEventListener('click', (event) => {
-    if (event.target === operationModal) closeModal();
-  });
-}
-
 if (addContactBtn) addContactBtn.addEventListener('click', openContactModal);
 if (closeContactModalBtn) closeContactModalBtn.addEventListener('click', closeContactModal);
-
-if (contactModal) {
-  contactModal.addEventListener('click', (event) => {
-    if (event.target === contactModal) closeContactModal();
-  });
-}
-
 if (manageServicesBtn) manageServicesBtn.addEventListener('click', openServicesModal);
 if (closeServicesModalBtn) closeServicesModalBtn.addEventListener('click', closeServicesModal);
-
-if (servicesModal) {
-  servicesModal.addEventListener('click', (event) => {
-    if (event.target === servicesModal) closeServicesModal();
-  });
-}
-
 if (closeReceiptModalBtn) closeReceiptModalBtn.addEventListener('click', closeReceiptModal);
 
-if (receiptModal) {
-  receiptModal.addEventListener('click', (event) => {
-    if (event.target === receiptModal) closeReceiptModal();
-  });
-}
-
-// Cierre accesible por teclado (Tecla Escape)
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeModal();
     closeContactModal();
     closeServicesModal();
     closeReceiptModal();
+    closeQrModal();
   }
 });
 
 
 // ==========================================
-// RENDERIZADO INICIAL DE LA INTERFAZ
+// FUNCIONALIDAD PROPUESTA 2: COBRAR Y PAGAR QR
+// ==========================================
+
+const qrGenTab = document.getElementById('qr-gen-tab');
+const qrScanTab = document.getElementById('qr-scan-tab');
+const qrGenSection = document.getElementById('qr-generator-section');
+const qrScanSection = document.getElementById('qr-scanner-section');
+
+function generateQRCode() {
+  const container = document.getElementById('qrcode-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  new QRCode(container, {
+    text: `techpay://pay?alias=techpay.sergio`,
+    width: 160,
+    height: 160,
+    colorDark: '#0f172a',
+    colorLight: '#ffffff'
+  });
+}
+
+function startQRScanner() {
+  stopQRScanner(); // Detiene cualquier instancia previa
+
+  const qrReaderContainer = document.getElementById("qr-reader");
+  if (qrReaderContainer) {
+    qrReaderContainer.innerHTML = ""; // Limpia el contenedor
+  }
+
+  html5QrCodeScanner = new Html5Qrcode("qr-reader");
+  html5QrCodeScanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 200, height: 200 } },
+    (decodedText) => {
+      stopQRScanner();
+      closeQrModal();
+      openModal('transfer');
+      if (operationDetailInput) {
+        operationDetailInput.value = decodedText.replace('techpay://pay?alias=', '');
+        validateRecipientInput();
+      }
+      showToast('QR Escaneado con éxito');
+    },
+    (errorMessage) => {
+      // Ignorar errores cuadro por cuadro
+    }
+  ).catch(err => {
+    console.warn("No se pudo iniciar la cámara o falta permiso.", err);
+  });
+}
+
+function stopQRScanner() {
+  if (html5QrCodeScanner) {
+    html5QrCodeScanner.stop().then(() => {
+      html5QrCodeScanner.clear();
+      html5QrCodeScanner = null;
+    }).catch(err => {
+      console.warn("Lector detenido previamente o no activo:", err);
+      html5QrCodeScanner = null;
+    });
+  }
+}
+
+if (openQrModalBtn) {
+  openQrModalBtn.addEventListener('click', () => {
+    if (qrModal) {
+      qrModal.classList.remove('is-hidden');
+      generateQRCode();
+    }
+  });
+}
+
+function closeQrModal() {
+  if (qrModal) {
+    qrModal.classList.add('is-hidden');
+    stopQRScanner();
+  }
+}
+
+if (closeQrModalBtn) closeQrModalBtn.addEventListener('click', closeQrModal);
+
+if (qrGenTab && qrScanTab) {
+  qrGenTab.addEventListener('click', () => {
+    qrGenTab.classList.add('is-active');
+    qrScanTab.classList.remove('is-active');
+    qrGenSection.classList.remove('is-hidden');
+    qrScanSection.classList.add('is-hidden');
+    stopQRScanner();
+  });
+
+  qrScanTab.addEventListener('click', () => {
+    qrScanTab.classList.add('is-active');
+    qrGenTab.classList.remove('is-active');
+    qrScanSection.classList.remove('is-hidden');
+    qrGenSection.classList.add('is-hidden');
+    startQRScanner();
+  });
+}
+
+
+// ==========================================
+// FUNCIONALIDAD PROPUESTA 3: GRÁFICO ESTADÍSTICO
+// ==========================================
+
+function renderExpensesChart() {
+  const ctx = document.getElementById('expenses-chart');
+  if (!ctx) return;
+
+  const categoryTotals = {
+    Servicios: 0,
+    Transferencias: 0,
+    Compras: 0,
+    Otros: 0
+  };
+
+  wallet.transactions.forEach(t => {
+    if (t.type === 'expense') {
+      const cat = t.category || 'Otros';
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + Number(t.amount);
+    }
+  });
+
+  const labels = Object.keys(categoryTotals);
+  const data = Object.values(categoryTotals);
+
+  if (expensesChart) expensesChart.destroy();
+
+  expensesChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: ['#eab308', '#3b82f6', '#ef4444', '#10b981'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: getComputedStyle(document.documentElement).getPropertyValue('--text-main').trim()
+          }
+        }
+      }
+    }
+  });
+}
+
+
+// ==========================================
+// FUNCIONALIDAD PROPUESTA 4: VALIDACIÓN REGEX CBU / ALIAS
+// ==========================================
+
+function validateRecipientInput() {
+  if (!operationDetailInput || !recipientInfo) return;
+
+  const value = operationDetailInput.value.trim();
+  const cbuRegex = /^\d{22}$/;
+  const aliasRegex = /^[a-zA-Z0-9]{3,}\.[a-zA-Z0-9]{3,}\.[a-zA-Z0-9]{3,}$/;
+
+  if (cbuRegex.test(value)) {
+    recipientInfo.textContent = '✓ CBU/CVU Válido (Destinatario Ficticio: Juan Pérez)';
+    recipientInfo.classList.remove('is-hidden');
+  } else if (aliasRegex.test(value)) {
+    recipientInfo.textContent = '✓ Alias Válido (Destinatario Ficticio: María Gómez)';
+    recipientInfo.classList.remove('is-hidden');
+  } else {
+    recipientInfo.classList.add('is-hidden');
+  }
+}
+
+if (operationDetailInput) {
+  operationDetailInput.addEventListener('input', validateRecipientInput);
+}
+
+
+// ==========================================
+// RENDERIZADO GENERAL Y MOVIMIENTOS
 // ==========================================
 
 const movementsList = document.getElementById('movements-list');
@@ -390,7 +553,6 @@ function renderMovementUI(transaction) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'movement-item';
-
   button.dataset.id = transaction.id;
   button.dataset.type = transaction.type;
   button.dataset.description = transaction.description;
@@ -416,7 +578,7 @@ function renderMovementUI(transaction) {
   strongTitle.textContent = transaction.description;
 
   const smallDate = document.createElement('small');
-  smallDate.textContent = `${transaction.date || 'Hoy'} · ${transaction.type === 'income' ? 'Ingreso' : transaction.type === 'currency' ? 'Divisas' : 'Transferencia'}`;
+  smallDate.textContent = `${transaction.date || 'Hoy'} · ${transaction.category || 'General'}`;
 
   copySpan.appendChild(strongTitle);
   copySpan.appendChild(smallDate);
@@ -446,19 +608,11 @@ function createContactCardUI(contact) {
   button.dataset.contactName = contact.name;
   button.dataset.contactAlias = contact.alias;
 
-  const avatarSpan = document.createElement('span');
-  avatarSpan.className = 'contact-avatar';
-  avatarSpan.textContent = contact.name.charAt(0).toUpperCase();
-
-  const strongName = document.createElement('strong');
-  strongName.textContent = contact.name;
-
-  const smallAlias = document.createElement('small');
-  smallAlias.textContent = contact.alias;
-
-  button.appendChild(avatarSpan);
-  button.appendChild(strongName);
-  button.appendChild(smallAlias);
+  button.innerHTML = `
+    <span class="contact-avatar">${contact.name.charAt(0).toUpperCase()}</span>
+    <strong>${contact.name}</strong>
+    <small>${contact.alias}</small>
+  `;
 
   return button;
 }
@@ -473,7 +627,6 @@ function renderServicesUI() {
   if (!servicesList) return;
 
   servicesList.innerHTML = '';
-
   wallet.services.forEach(service => {
     const article = document.createElement('article');
     article.className = `service-item ${service.paid ? 'is-paid' : ''}`;
@@ -501,6 +654,9 @@ function renderServicesUI() {
 }
 
 function initUI() {
+  initTheme();
+  renderBalance();
+
   if (movementsList) {
     movementsList.textContent = '';
     wallet.transactions.forEach(renderMovementUI);
@@ -509,25 +665,19 @@ function initUI() {
   if (contactsList) {
     const addCard = document.getElementById('add-contact');
     contactsList.innerHTML = '';
-
-    wallet.contacts.forEach(contact => {
-      const card = createContactCardUI(contact);
-      contactsList.appendChild(card);
-    });
-
-    if (addCard) {
-      contactsList.appendChild(addCard);
-    }
+    wallet.contacts.forEach(contact => contactsList.appendChild(createContactCardUI(contact)));
+    if (addCard) contactsList.appendChild(addCard);
   }
 
   renderServicesUI();
   filterMovements();
   fetchDollarRates();
+  renderExpensesChart();
 }
 
 
 // ==========================================
-// FUNCIONALIDAD 5: ADMINISTRACIÓN DE SERVICIOS (ABM)
+// ADMINISTRACIÓN DE SERVICIOS (ABM)
 // ==========================================
 
 const modalServicesList = document.getElementById('modal-services-list');
@@ -544,7 +694,6 @@ function renderModalServicesList() {
   if (!modalServicesList) return;
 
   modalServicesList.innerHTML = '';
-
   if (wallet.services.length === 0) {
     modalServicesList.innerHTML = '<p style="font-size: 12px; color: var(--text-muted); text-align: center;">No tenés servicios agregados.</p>';
     return;
@@ -594,13 +743,8 @@ function hideServiceForm() {
   }
 }
 
-if (btnShowAddService) {
-  btnShowAddService.addEventListener('click', () => showServiceForm());
-}
-
-if (cancelServiceBtn) {
-  cancelServiceBtn.addEventListener('click', hideServiceForm);
-}
+if (btnShowAddService) btnShowAddService.addEventListener('click', () => showServiceForm());
+if (cancelServiceBtn) cancelServiceBtn.addEventListener('click', hideServiceForm);
 
 if (modalServicesList) {
   modalServicesList.addEventListener('click', (event) => {
@@ -608,14 +752,12 @@ if (modalServicesList) {
     const deleteBtn = event.target.closest('[data-action="delete"]');
 
     if (editBtn) {
-      const serviceId = editBtn.dataset.id;
-      const service = wallet.services.find(s => s.id === serviceId);
+      const service = wallet.services.find(s => s.id === editBtn.dataset.id);
       if (service) showServiceForm(service);
     }
 
     if (deleteBtn) {
-      const serviceId = deleteBtn.dataset.id;
-      wallet.services = wallet.services.filter(s => s.id !== serviceId);
+      wallet.services = wallet.services.filter(s => s.id !== deleteBtn.dataset.id);
       saveWallet();
       renderModalServicesList();
       renderServicesUI();
@@ -669,7 +811,7 @@ if (serviceForm) {
 
 
 // ==========================================
-// FUNCIONALIDAD 6: OPERACIONES DE SALDO
+// OPERACIONES DE SALDO
 // ==========================================
 
 const operationForm = document.getElementById('operation-form');
@@ -679,8 +821,9 @@ if (operationForm) {
     event.preventDefault();
 
     const currentOperation = operationModal.dataset.operation;
-    const rawAmount = operationAmountInput ? operationAmountInput.value : '';
-    const amount = Number(rawAmount);
+    const amount = Number(operationAmountInput ? operationAmountInput.value : '');
+    const categorySelect = document.getElementById('operation-category');
+    const selectedCategory = categorySelect ? categorySelect.value : 'Otros';
 
     if (isNaN(amount) || amount <= 0) {
       showToast('Ingresá un monto válido mayor a 0');
@@ -695,6 +838,7 @@ if (operationForm) {
       const newTransaction = {
         id: Date.now().toString(),
         type: 'income',
+        category: selectedCategory,
         amount: amount,
         description: descriptionValue || 'Ingreso de dinero',
         date: 'Hoy, ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -704,12 +848,13 @@ if (operationForm) {
       renderMovementUI(newTransaction);
       renderBalance();
       saveWallet();
+      renderExpensesChart();
       showToast('¡Ingreso realizado con éxito!');
       closeModal();
 
     } else if (currentOperation === 'transfer') {
       if (!descriptionValue) {
-        showToast('Ingresá una descripción o alias de destino');
+        showToast('Ingresá una descripción, CBU/CVU o alias');
         return;
       }
 
@@ -723,6 +868,7 @@ if (operationForm) {
       const newTransaction = {
         id: Date.now().toString(),
         type: 'expense',
+        category: selectedCategory,
         amount: amount,
         description: `Transferencia a ${descriptionValue}`,
         date: 'Hoy, ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -732,6 +878,7 @@ if (operationForm) {
       renderMovementUI(newTransaction);
       renderBalance();
       saveWallet();
+      renderExpensesChart();
       showToast('¡Transferencia enviada con éxito!');
       closeModal();
 
@@ -749,6 +896,7 @@ if (operationForm) {
       const newTransaction = {
         id: Date.now().toString(),
         type: 'currency',
+        category: 'Divisas',
         amount: amount,
         description: `Compra de USD$ ${usdPurchased} (Cotización: ${formatCurrencyARS(dollarRates.venta)})`,
         date: 'Hoy, ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -758,6 +906,7 @@ if (operationForm) {
       renderMovementUI(newTransaction);
       renderBalance();
       saveWallet();
+      renderExpensesChart();
 
       showToast(`¡Compraste USD$ ${usdPurchased} con éxito!`);
       closeModal();
@@ -767,7 +916,7 @@ if (operationForm) {
 
 
 // ==========================================
-// FUNCIONALIDAD 7: GESTIÓN DE CONTACTOS
+// GESTIÓN DE CONTACTOS Y SERVICIOS
 // ==========================================
 
 const contactForm = document.getElementById('contact-form');
@@ -775,13 +924,11 @@ const contactForm = document.getElementById('contact-form');
 if (contactsList) {
   contactsList.addEventListener('click', (event) => {
     const contactCard = event.target.closest('[data-contact-alias]');
-
     if (contactCard && contactCard.id !== 'add-contact') {
-      const alias = contactCard.dataset.contactAlias;
       openModal('transfer');
-
       if (operationDetailInput) {
-        operationDetailInput.value = alias;
+        operationDetailInput.value = contactCard.dataset.contactAlias;
+        validateRecipientInput();
       }
     }
   });
@@ -793,7 +940,6 @@ if (contactForm) {
 
     const nameInput = document.getElementById('contact-name');
     const aliasInput = document.getElementById('contact-alias');
-
     const nameValue = nameInput ? nameInput.value.trim() : '';
     const aliasValue = aliasInput ? aliasInput.value.trim().toLowerCase() : '';
 
@@ -802,29 +948,19 @@ if (contactForm) {
       return;
     }
 
-    const aliasExists = wallet.contacts.some(contact => contact.alias.toLowerCase() === aliasValue);
-
-    if (aliasExists) {
+    if (wallet.contacts.some(c => c.alias.toLowerCase() === aliasValue)) {
       showToast('El alias ingresado ya existe en tus contactos');
       return;
     }
 
-    const newContact = {
-      id: String(Date.now()),
-      name: nameValue,
-      alias: aliasValue
-    };
-
+    const newContact = { id: String(Date.now()), name: nameValue, alias: aliasValue };
     wallet.contacts.push(newContact);
 
     const addCard = document.getElementById('add-contact');
     const newCard = createContactCardUI(newContact);
 
-    if (addCard && contactsList) {
-      contactsList.insertBefore(newCard, addCard);
-    } else if (contactsList) {
-      contactsList.appendChild(newCard);
-    }
+    if (addCard && contactsList) contactsList.insertBefore(newCard, addCard);
+    else if (contactsList) contactsList.appendChild(newCard);
 
     saveWallet();
     showToast('Contacto agregado con éxito');
@@ -832,15 +968,9 @@ if (contactForm) {
   });
 }
 
-
-// ==========================================
-// FUNCIONALIDAD 8: PAGO DE SERVICIOS
-// ==========================================
-
 if (servicesList) {
   servicesList.addEventListener('click', (event) => {
     const payBtn = event.target.closest('.pay-service');
-
     if (!payBtn || payBtn.disabled) return;
 
     const serviceItem = payBtn.closest('.service-item');
@@ -848,13 +978,7 @@ if (servicesList) {
 
     const serviceId = serviceItem.dataset.serviceId;
     const serviceAmount = Number(serviceItem.dataset.serviceAmount);
-    const serviceNameElement = serviceItem.querySelector('.service-copy strong');
-    const serviceName = serviceNameElement ? serviceNameElement.textContent : 'Servicio';
-
-    if (isNaN(serviceAmount) || serviceAmount <= 0) {
-      showToast('El importe del servicio no es válido');
-      return;
-    }
+    const serviceName = serviceItem.querySelector('.service-copy strong').textContent;
 
     if (serviceAmount > wallet.balanceARS) {
       showToast('Saldo insuficiente para pagar este servicio');
@@ -862,11 +986,8 @@ if (servicesList) {
     }
 
     wallet.balanceARS -= serviceAmount;
-
     const serviceData = wallet.services.find(s => s.id === serviceId);
-    if (serviceData) {
-      serviceData.paid = true;
-    }
+    if (serviceData) serviceData.paid = true;
 
     serviceItem.classList.add('is-paid');
     payBtn.disabled = true;
@@ -877,6 +998,7 @@ if (servicesList) {
     const newTransaction = {
       id: Date.now().toString(),
       type: 'expense',
+      category: 'Servicios',
       amount: serviceAmount,
       description: `Pago de servicio: ${serviceName}`,
       date: 'Hoy, ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
@@ -886,6 +1008,7 @@ if (servicesList) {
     renderMovementUI(newTransaction);
     renderBalance();
     saveWallet();
+    renderExpensesChart();
 
     showToast(`¡Pago de ${serviceName} realizado con éxito!`);
   });
@@ -893,7 +1016,7 @@ if (servicesList) {
 
 
 // ==========================================
-// FUNCIONALIDAD 9: FILTROS Y BÚSQUEDA DINÁMICA
+// FILTROS, COMPROBANTE Y NOTIFICACIONES
 // ==========================================
 
 const filterTabs = document.querySelectorAll('[data-filter]');
@@ -925,101 +1048,46 @@ function filterMovements() {
   });
 
   if (noMovementsMsg) {
-    if (visibleCount === 0) {
-      noMovementsMsg.classList.remove('is-hidden');
-    } else {
-      noMovementsMsg.classList.add('is-hidden');
-    }
+    noMovementsMsg.classList.toggle('is-hidden', visibleCount > 0);
   }
 }
 
 filterTabs.forEach(tab => {
   tab.addEventListener('click', () => {
     activeFilter = tab.dataset.filter;
-
     filterTabs.forEach(t => {
       t.classList.remove('is-active');
       t.setAttribute('aria-selected', 'false');
     });
-
     tab.classList.add('is-active');
     tab.setAttribute('aria-selected', 'true');
-
     filterMovements();
   });
 });
 
-if (searchInput) {
-  searchInput.addEventListener('input', filterMovements);
-}
-
-
-// ==========================================
-// FUNCIONALIDAD 10: COMPROBANTE DE MOVIMIENTO
-// ==========================================
-
-const receiptAmount = document.getElementById('receipt-amount');
-const receiptDescription = document.getElementById('receipt-description');
-const receiptId = document.getElementById('receipt-id');
-const receiptStatus = document.getElementById('receipt-status');
+if (searchInput) searchInput.addEventListener('input', filterMovements);
 
 if (movementsList) {
   movementsList.addEventListener('click', (event) => {
     const item = event.target.closest('.movement-item');
-
     if (!item) return;
 
-    const amountElement = item.querySelector('.movement-amount');
-    const amountText = amountElement ? amountElement.textContent : 'ARS$ 0,00';
-    
-    const strongTitle = item.querySelector('.movement-copy strong');
-    const descriptionText = item.dataset.description || (strongTitle ? strongTitle.textContent : 'Sin descripción');
-    const transactionId = item.dataset.id || `TX-${Date.now()}`;
+    const receiptAmount = document.getElementById('receipt-amount');
+    const receiptDescription = document.getElementById('receipt-description');
+    const receiptId = document.getElementById('receipt-id');
 
-    if (receiptAmount) receiptAmount.textContent = amountText;
-    if (receiptDescription) receiptDescription.textContent = descriptionText;
-    if (receiptId) receiptId.textContent = `#${transactionId}`;
-    if (receiptStatus) receiptStatus.textContent = 'Completado';
+    if (receiptAmount) receiptAmount.textContent = item.querySelector('.movement-amount').textContent;
+    if (receiptDescription) receiptDescription.textContent = item.dataset.description;
+    if (receiptId) receiptId.textContent = `#${item.dataset.id}`;
 
-    if (receiptModal) {
-      receiptModal.classList.remove('is-hidden');
-    }
+    if (receiptModal) receiptModal.classList.remove('is-hidden');
   });
 }
 
-
-// ==========================================
-// FUNCIONALIDAD 11: NOTIFICACIONES MODAL
-// ==========================================
-
+// Inicialización de Notificaciones
 const notificationsData = [
-  {
-    id: 1,
-    type: 'income',
-    icon: '↓',
-    title: 'Ingreso de dinero',
-    message: 'Recibiste ARS$ 15.000,00 de María González.',
-    time: 'Hace 10 min',
-    unread: true
-  },
-  {
-    id: 2,
-    type: 'warning',
-    icon: '⚠️',
-    title: 'Próximo vencimiento',
-    message: 'Tu servicio de Luz (Energía Sur) vence pronto.',
-    time: 'Hace 2 horas',
-    unread: true
-  },
-  {
-    id: 3,
-    type: 'transfer',
-    icon: '↑',
-    title: 'Transferencia realizada',
-    message: 'Enviaste ARS$ 4.500,00 a Camila.',
-    time: 'Ayer',
-    unread: false
-  }
+  { id: 1, type: 'income', icon: '↓', title: 'Ingreso de dinero', message: 'Recibiste ARS$ 15.000,00 de María González.', time: 'Hace 10 min', unread: true },
+  { id: 2, type: 'warning', icon: '⚠️', title: 'Próximo vencimiento', message: 'Tu servicio de Luz (Energía Sur) vence pronto.', time: 'Hace 2 horas', unread: true }
 ];
 
 const notificationBtn = document.getElementById('notification-btn');
@@ -1027,47 +1095,29 @@ const notificationsModal = document.getElementById('notifications-modal');
 const closeNotificationsBtn = document.getElementById('close-notifications-modal');
 const notificationsContainer = document.getElementById('notifications-container');
 
-function renderNotifications() {
-  if (!notificationsContainer) return;
-  
-  notificationsContainer.innerHTML = notificationsData.map(notif => `
-    <div class="notification-item ${notif.unread ? 'is-unread' : ''}">
-      <div class="notification-icon-box notif-type-${notif.type}">
-        ${notif.icon}
-      </div>
-      <div class="notification-content">
-        <strong>${notif.title}</strong>
-        <p>${notif.message}</p>
-        <span class="notification-time">${notif.time}</span>
-      </div>
-    </div>
-  `).join('');
-}
-
 if (notificationBtn && notificationsModal) {
   notificationBtn.addEventListener('click', () => {
-    renderNotifications();
+    if (notificationsContainer) {
+      notificationsContainer.innerHTML = notificationsData.map(n => `
+        <div class="notification-item ${n.unread ? 'is-unread' : ''}">
+          <div class="notification-icon-box notif-type-${n.type}">${n.icon}</div>
+          <div class="notification-content">
+            <strong>${n.title}</strong>
+            <p>${n.message}</p>
+            <span class="notification-time">${n.time}</span>
+          </div>
+        </div>
+      `).join('');
+    }
     notificationsModal.classList.remove('is-hidden');
-    notificationsModal.setAttribute('aria-hidden', 'false');
-
     const dot = notificationBtn.querySelector('.notification-dot');
     if (dot) dot.style.display = 'none';
   });
 }
 
 if (closeNotificationsBtn && notificationsModal) {
-  closeNotificationsBtn.addEventListener('click', () => {
-    notificationsModal.classList.add('is-hidden');
-    notificationsModal.setAttribute('aria-hidden', 'true');
-  });
-
-  notificationsModal.addEventListener('click', (e) => {
-    if (e.target === notificationsModal) {
-      notificationsModal.classList.add('is-hidden');
-      notificationsModal.setAttribute('aria-hidden', 'true');
-    }
-  });
+  closeNotificationsBtn.addEventListener('click', () => notificationsModal.classList.add('is-hidden'));
 }
 
-// Carga e inicialización al arrancar la aplicación
+// Inicializar la App al cargar los scripts
 initUI();
